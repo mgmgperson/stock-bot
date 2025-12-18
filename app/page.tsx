@@ -1,65 +1,187 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useMemo, useState, useCallback } from "react";
+import type { SMAWindow, BelowSmaItem, ScanResponse } from "@/lib/types/stock";
+
+import { AgGridReact } from "ag-grid-react";
+import {
+  AllCommunityModule,
+  ModuleRegistry,
+  type ColDef,
+} from "ag-grid-community";
+
+import "ag-grid-community/styles/ag-theme-quartz.css";
+
+// Register all community features
+ModuleRegistry.registerModules([AllCommunityModule]);
+
+const WINDOWS: SMAWindow[] = [20, 50, 120, 200];
+
+function fmtPct(x: number) {
+  return `${(x * 100).toFixed(2)}%`;
+}
+
+function fmtNum(x: number) {
+  return x.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
 
 export default function Home() {
+  const [window, setWindow] = useState<SMAWindow>(200);
+  const [asOf, setAsOf] = useState<string>("");
+  const [rowData, setRowData] = useState<BelowSmaItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchScan = useCallback(async (w: SMAWindow) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch(`/api/scan?window=${w}`, { cache: "no-store" });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`HTTP ${res.status}: ${txt}`);
+      }
+
+      const data = (await res.json()) as ScanResponse;
+      setAsOf(data.asOf);
+      setRowData(data.below);
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to fetch scan results.");
+      setRowData([]);
+      setAsOf("");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchScan(window);
+  }, [window, fetchScan]);
+
+  const colDefs = useMemo<ColDef<BelowSmaItem>[]>(() => {
+    return [
+      {
+        headerName: "Symbol",
+        field: "symbol",
+        width: 120,
+        sortable: true,
+        filter: true,
+        pinned: "left",
+      },
+      {
+        headerName: "Close",
+        field: "close",
+        width: 140,
+        valueFormatter: (p) => fmtNum(p.value),
+        sortable: true,
+        filter: "agNumberColumnFilter",
+      },
+      {
+        headerName: `SMA(${window})`,
+        field: "sma",
+        width: 160,
+        valueFormatter: (p) => fmtNum(p.value),
+        sortable: true,
+        filter: "agNumberColumnFilter",
+      },
+      {
+        headerName: "% Below",
+        field: "pctBelow",
+        width: 150,
+        valueFormatter: (p) => fmtPct(p.value),
+        sortable: true,
+        filter: "agNumberColumnFilter",
+      },
+    ];
+  }, [window]);
+
+  const defaultColDef = useMemo<ColDef>(() => {
+    return {
+      resizable: true,
+      sortable: true,
+      filter: true,
+    };
+  }, []);
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div className="min-h-screen bg-zinc-50 px-4 py-6 text-zinc-900 dark:bg-black dark:text-zinc-50">
+      <div className="mx-auto w-full max-w-5xl space-y-4">
+        <header className="space-y-2">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            S&amp;P 500 — Below Moving Average
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            Shows tickers where <span className="font-medium">Close &lt; SMA(N)</span> using
+            the latest available daily close.
+            {asOf ? (
+              <>
+                {" "}
+                <span className="font-medium">As of:</span> {asOf}
+              </>
+            ) : null}
+          </p>
+        </header>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {WINDOWS.map((w) => (
+            <button
+              key={w}
+              onClick={() => setWindow(w)}
+              className={[
+                "rounded-full px-4 py-2 text-sm font-medium transition",
+                w === window
+                  ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-black"
+                  : "bg-white text-zinc-900 ring-1 ring-zinc-200 hover:bg-zinc-100 dark:bg-zinc-900 dark:text-zinc-50 dark:ring-zinc-800 dark:hover:bg-zinc-800",
+              ].join(" ")}
+              disabled={loading && w === window}
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+              SMA {w}
+            </button>
+          ))}
+
+          <div className="ml-auto flex items-center gap-3">
+            {loading ? (
+              <span className="text-sm text-zinc-600 dark:text-zinc-400">
+                Loading…
+              </span>
+            ) : (
+              <span className="text-sm text-zinc-600 dark:text-zinc-400">
+                {rowData.length.toLocaleString()} tickers
+              </span>
+            )}
+            <button
+              onClick={() => fetchScan(window)}
+              className="rounded-full px-4 py-2 text-sm font-medium ring-1 ring-zinc-200 hover:bg-zinc-100 dark:ring-zinc-800 dark:hover:bg-zinc-800"
             >
-              Learning
-            </a>{" "}
-            center.
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {error ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
+            {error}
+          </div>
+        ) : null}
+
+        <div className="rounded-xl bg-white p-3 shadow-sm ring-1 ring-zinc-200 dark:bg-zinc-950 dark:ring-zinc-800">
+          <div className="ag-theme-quartz dark:ag-theme-quartz-dark" style={{ height: 640 }}>
+            <AgGridReact<BelowSmaItem>
+              rowData={rowData}
+              columnDefs={colDefs}
+              defaultColDef={defaultColDef}
+              animateRows={true}
+              pagination={true}
+              paginationPageSize={50}
+              quickFilterText={undefined}
+            />
+          </div>
+          <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-500">
+            Tip: use the column filter on “Symbol” to quickly search tickers.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      </div>
     </div>
   );
 }
