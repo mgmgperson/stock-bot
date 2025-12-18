@@ -1,0 +1,49 @@
+name: Daily SMA Scan
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekdays at 22:45 UTC (5:45pm ET in winter; 6:45pm ET in summer)
+    - cron: "45 22 * * 1-5"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-sma
+  cancel-in-progress: false
+
+jobs:
+  build-and-commit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install
+        run: npm ci
+
+      - name: Build sma-scan.json
+        run: npm run build:sma
+
+      - name: Commit & push if changed
+        run: |
+          git status --porcelain
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add public/sma-scan.json
+          git commit -m "chore: update sma-scan.json [skip ci]"
+          git push
